@@ -171,6 +171,9 @@ using v8::Value;
 static Mutex process_mutex;
 static Mutex environ_mutex;
 
+bool g_standalone_mode = true;
+bool g_upstream_node_mode = true;
+
 static bool print_eval = false;
 static bool force_repl = false;
 static bool syntax_check_only = false;
@@ -2467,6 +2470,13 @@ static bool ExecuteBootstrapper(Environment* env, Local<Function> bootstrapper,
 
 
 void LoadEnvironment(Environment* env) {
+  if (g_standalone_mode) {
+    env->isolate()->AddMessageListener(OnMessage);
+  }
+  if (g_upstream_node_mode) {
+    env->isolate()->SetFatalErrorHandler(OnFatalError);
+  }
+
   HandleScope handle_scope(env->isolate());
 
   TryCatch try_catch(env->isolate());
@@ -3375,7 +3385,9 @@ void Init(int* argc,
   RegisterBuiltinModules();
 
   // Make inherited handles noninheritable.
-  uv_disable_stdio_inheritance();
+  if (g_upstream_node_mode) {
+    uv_disable_stdio_inheritance();
+  }
 
 #if defined(NODE_V8_OPTIONS)
   // Should come before the call to V8::SetFlagsFromCommandLine()
@@ -3439,26 +3451,28 @@ void Init(int* argc,
   }
 #endif
 
-  ProcessArgv(argc, argv, exec_argc, exec_argv);
+  if (g_upstream_node_mode) {
+    ProcessArgv(argc, argv, exec_argc, exec_argv);
 
-  // Set the process.title immediately after processing argv if --title is set.
-  if (!config_process_title.empty())
-    uv_set_process_title(config_process_title.c_str());
+    // Set the process.title immediately after processing argv if --title is set.
+    if (!config_process_title.empty())
+      uv_set_process_title(config_process_title.c_str());
 
 #if defined(NODE_HAVE_I18N_SUPPORT)
-  // If the parameter isn't given, use the env variable.
-  if (icu_data_dir.empty())
-    SafeGetenv("NODE_ICU_DATA", &icu_data_dir);
-  // Initialize ICU.
-  // If icu_data_dir is empty here, it will load the 'minimal' data.
-  if (!i18n::InitializeICUDirectory(icu_data_dir)) {
-    fprintf(stderr,
-            "%s: could not initialize ICU "
-            "(check NODE_ICU_DATA or --icu-data-dir parameters)\n",
-            argv[0]);
-    exit(9);
-  }
+    // If the parameter isn't given, use the env variable.
+    if (icu_data_dir.empty())
+      SafeGetenv("NODE_ICU_DATA", &icu_data_dir);
+    // Initialize ICU.
+    // If icu_data_dir is empty here, it will load the 'minimal' data.
+    if (!i18n::InitializeICUDirectory(icu_data_dir)) {
+      fprintf(stderr,
+              "%s: could not initialize ICU "
+              "(check NODE_ICU_DATA or --icu-data-dir parameters)\n",
+              argv[0]);
+      exit(9);
+    }
 #endif
+  }  // g_upstream_node_mode
 
   // We should set node_is_initialized here instead of in node::Start,
   // otherwise embedders using node::Init to initialize everything will not be
